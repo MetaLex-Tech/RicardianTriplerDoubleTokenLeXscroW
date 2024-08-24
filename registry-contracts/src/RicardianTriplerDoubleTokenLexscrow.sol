@@ -46,7 +46,7 @@ struct LockedAsset {
 /// @notice details of a party: address, name, and contact information
 struct Party {
     /// @notice The blockchain address of the party
-    address confirmingPartylockchainAddy;
+    address confirmingPartyBlockchainAddy;
     /// @notice The name of the party adopting the agreement
     string partyName;
     /// @notice The contact details of the party (required for pre-notifying)
@@ -120,10 +120,10 @@ contract AgreementV1Factory is SignatureValidator {
         address _agreementAddress = address(agreementDetails);
 
         // if msg.sender is proposingParty, nested map it to the pending agreement to the address that needs to confirm adoption, and vice versa if confirmingParty; else, revert
-        if (msg.sender == details.proposingParty.confirmingPartylockchainAddy)
-            pendingAgreement[msg.sender][_agreementAddress] = details.confirmingParty.confirmingPartylockchainAddy;
-        else if (msg.sender == details.confirmingParty.confirmingPartylockchainAddy)
-            pendingAgreement[msg.sender][_agreementAddress] = details.proposingParty.confirmingPartylockchainAddy;
+        if (msg.sender == details.proposingParty.confirmingPartyBlockchainAddy)
+            pendingAgreement[msg.sender][_agreementAddress] = details.confirmingParty.confirmingPartyBlockchainAddy;
+        else if (msg.sender == details.confirmingParty.confirmingPartyBlockchainAddy)
+            pendingAgreement[msg.sender][_agreementAddress] = details.proposingParty.confirmingPartyBlockchainAddy;
         else revert RicardianTriplerDoubleTokenLexscrow_NotParty();
 
         pendingAgreementHash[keccak256(abi.encode(details))] = true;
