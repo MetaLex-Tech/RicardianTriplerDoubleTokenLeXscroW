@@ -22,11 +22,11 @@ struct Account {
 /// @notice the details of the agreement.
 struct AgreementDetailsV1 {
     /// @notice The details of the parties adopting the agreement
-    Party partyA;
-    Party partyB;
+    Party proposingParty;
+    Party confirmingParty;
     /// @notice The assets and amounts being escrowed by each party
-    LockedAsset lockedAssetPartyA;
-    LockedAsset lockedAssetPartyB;
+    LockedAsset lockedAssetproposingParty;
+    LockedAsset lockedAssetconfirmingParty;
     /// @notice IPFS hash of the official MetaLeX LeXscroW Agreement version being agreed to which confirms all terms, and may contain a unique interface identifier
     string legalAgreementURI;
     /// @notice governing law for the Agreement
@@ -46,7 +46,7 @@ struct LockedAsset {
 /// @notice details of a party: address, name, and contact information
 struct Party {
     /// @notice The blockchain address of the party
-    address partyBlockchainAddy;
+    address confirmingPartylockchainAddy;
     /// @notice The name of the party adopting the agreement
     string partyName;
     /// @notice The contact details of the party (required for pre-notifying)
@@ -119,11 +119,11 @@ contract AgreementV1Factory is SignatureValidator {
         RicardianTriplerDoubleTokenLexscrow agreementDetails = new RicardianTriplerDoubleTokenLexscrow(details);
         address _agreementAddress = address(agreementDetails);
 
-        // if msg.sender is partyA, nested map it to the pending agreement to the address that needs to confirm adoption, and vice versa if partyB; else, revert
-        if (msg.sender == details.partyA.partyBlockchainAddy)
-            pendingAgreement[msg.sender][_agreementAddress] = details.partyB.partyBlockchainAddy;
-        else if (msg.sender == details.partyB.partyBlockchainAddy)
-            pendingAgreement[msg.sender][_agreementAddress] = details.partyA.partyBlockchainAddy;
+        // if msg.sender is proposingParty, nested map it to the pending agreement to the address that needs to confirm adoption, and vice versa if confirmingParty; else, revert
+        if (msg.sender == details.proposingParty.confirmingPartylockchainAddy)
+            pendingAgreement[msg.sender][_agreementAddress] = details.confirmingParty.confirmingPartylockchainAddy;
+        else if (msg.sender == details.confirmingParty.confirmingPartylockchainAddy)
+            pendingAgreement[msg.sender][_agreementAddress] = details.proposingParty.confirmingPartylockchainAddy;
         else revert RicardianTriplerDoubleTokenLexscrow_NotParty();
 
         pendingAgreementHash[keccak256(abi.encode(details))] = true;
