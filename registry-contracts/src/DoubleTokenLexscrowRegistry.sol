@@ -1,7 +1,8 @@
-// SPDX-License-Identifier: UNLICENSED
+//SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.18;
 
 /// @title Double Token LeXscroW Registry
+/// @author MetaLeX Labs, Inc.
 /// @notice `admin`-controlled registry contract for valid agreement factories which records duly adopted Double Token LeXscroW Agreements
 /// @dev `admin` sets valid factories with approved agreement forms
 contract DoubleTokenLexscrowRegistry {
