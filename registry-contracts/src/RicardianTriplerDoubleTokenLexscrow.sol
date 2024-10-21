@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+//SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.18;
 
 import "./SignatureValidator.sol";
@@ -89,6 +89,8 @@ struct Party {
 /// CONTRACTS
 ///
 
+/// @title Ricardian Tripler Double Token LeXscroW
+/// @author MetaLeX Labs, Inc.
 /// @notice Contract that contains the Double Token LeXscroW agreement details that will be deployed by the Agreement Factory.
 contract RicardianTriplerDoubleTokenLexscrow {
     uint256 internal constant AGREEMENT_VERSION = 1;
