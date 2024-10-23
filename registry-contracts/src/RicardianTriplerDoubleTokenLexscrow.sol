@@ -59,6 +59,8 @@ struct AgreementDetailsV1 {
     string disputeResolutionMethod;
     /// @notice array of `Condition` structs upon which the DoubleTokenLexscrow is contingent
     Condition[] conditions;
+    /// @notice any additional conditions precedent not included in `conditions`; note the DoubleTokenLexscrow's onchain execution will not be affected by these
+    string otherConditions;
 }
 
 /// @notice match `Condition` as defined in LexscrowConditionManager
@@ -110,6 +112,7 @@ contract RicardianTriplerDoubleTokenLexscrow {
         details.legalAgreementURI = _details.legalAgreementURI;
         details.governingLaw = _details.governingLaw;
         details.disputeResolutionMethod = _details.disputeResolutionMethod;
+        details.otherConditions = _details.otherConditions;
 
         // necessary for copying dynamic array of structs to storage
         for (uint256 i = 0; i < _details.conditions.length; ) {
