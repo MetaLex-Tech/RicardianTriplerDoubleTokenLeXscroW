@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: UNLICENSED
+//SPDX-License-Identifier: AGPL-3.0-only
 pragma solidity ^0.8.13;
 
 import {console} from "forge-std/console.sol";
@@ -51,7 +51,8 @@ contract GenerateAccountSignatureV1 is ScriptBase {
             lockedAssetPartyB: _lockedAssetPartyB,
             legalAgreementURI: "ipfs://testHash",
             governingLaw: "MetaLaW",
-            disputeResolutionMethod: "coin flip"
+            disputeResolutionMethod: "coin flip",
+            otherConditions: "mercury not in retrograde"
         });
 
         return details;
