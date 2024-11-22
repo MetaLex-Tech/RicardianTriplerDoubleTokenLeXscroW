@@ -3,6 +3,7 @@ pragma solidity ^0.8.18;
 
 import "./SignatureValidator.sol";
 
+/// @notice interface to DoubleTokenLexscrowFactory.sol to deploy a DoubleTokenLexscrow
 interface IDoubleTokenLexscrowFactory {
     function deployDoubleTokenLexscrow(
         bool openOffer,
@@ -18,8 +19,37 @@ interface IDoubleTokenLexscrowFactory {
     ) external;
 }
 
+/// @notice interface to DoubleTokenLexscrowRegistry.sol to record adoption
 interface IDoubleTokenLexscrowRegistry {
     function recordAdoption(address confirmingParty, address proposingParty, address agreementDetailsAddress) external;
+}
+
+interface IRicardianTriplerDoubleTokenLexscrow {
+    function getDetails() external view returns (AgreementDetailsV1 memory);
+
+    function mutualSign() external;
+}
+
+/// @notice interface for a Lexscrow Condition
+interface ICondition {
+    function checkCondition(
+        address _contract,
+        bytes4 _functionSignature,
+        bytes memory data
+    ) external view returns (bool);
+}
+
+/// @notice OpenZeppelin's IERC165 interface for use with the ICondition interfaceId
+interface IERC165 {
+    /**
+     * @dev Returns true if this contract implements the interface defined by
+     * `interfaceId`. See the corresponding
+     * https://eips.ethereum.org/EIPS/eip-165#how-interfaces-are-identified[ERC section]
+     * to learn more about how these ids are created.
+     *
+     * This function call must use less than 30 000 gas.
+     */
+    function supportsInterface(bytes4 interfaceId) external view returns (bool);
 }
 
 ///
@@ -94,15 +124,31 @@ struct Party {
 /// @title Ricardian Tripler Double Token LeXscroW
 /// @author MetaLeX Labs, Inc.
 /// @notice Contract that contains the Double Token LeXscroW agreement details that will be deployed by the Agreement Factory.
+/// @dev If deployed via `deployLexscrowAndProposeDoubleTokenLexscrowAgreement()` in the Agreement Factory, this contract being mutually signed
+/// and recorded in the registry becomes an immutable condition to the underlying DoubleTokenLexscrow's execution
 contract RicardianTriplerDoubleTokenLexscrow {
     uint256 internal constant AGREEMENT_VERSION = 1;
+
+    /// @notice store the deployer (AgreementFactory) in order to restrict ability to update `mutuallySigned`
+    address internal deployer;
+
+    /// @notice boolean indicating whether this agreement has been mutually signed
+    bool public mutuallySigned;
 
     /// @notice The details of the agreement; accessible via `getDetails`
     AgreementDetailsV1 internal details;
 
+    error RicardianTriplerDoubleTokenLexscrow_OnlyDeployer();
+
+    event RicardianTriplerDoubleTokenLexscrow_MutuallySigned();
+
     /// @notice Constructor that sets the details of the agreement.
     /// @param _details the `AgreementDetailsV1` struct containing the details of the agreement.
-    constructor(AgreementDetailsV1 memory _details) {
+    /// @param _adoptedTriplerCondition whether adoption of this tripler is a codified condition to Lexscrow execution (i.e. if the Lexscrow was deployed in `deployLexscrowAndProposeDoubleTokenLexscrowAgreement()`)
+    constructor(AgreementDetailsV1 memory _details, bool _adoptedTriplerCondition) {
+        deployer = msg.sender;
+
+        // store everything but `conditions`
         details.partyA = _details.partyA;
         details.partyB = _details.partyB;
         details.lockedAssetPartyA = _details.lockedAssetPartyA;
@@ -114,13 +160,71 @@ contract RicardianTriplerDoubleTokenLexscrow {
         details.disputeResolutionMethod = _details.disputeResolutionMethod;
         details.otherConditions = _details.otherConditions;
 
-        // necessary for copying dynamic array of structs to storage
-        for (uint256 i = 0; i < _details.conditions.length; ) {
-            details.conditions.push(_details.conditions[i]);
-            unchecked {
-                ++i; // cannot overflow without hitting gaslimit
+        // if `_adoptedTriplerCondition`, create a new array with an additional slot for the new condition and assign it to `details.conditions`,
+        // else simply assign `_details.conditions` to `details.conditions`
+        if (_adoptedTriplerCondition) {
+            Condition[] memory updatedConditions = new Condition[](_details.conditions.length + 1);
+
+            // copy the existing conditions into the new array
+            for (uint256 i = 0; i < _details.conditions.length; i++) {
+                updatedConditions[i] = _details.conditions[i];
+            }
+
+            // add the new condition to the last slot, with address(this) as the condition contract
+            /// @dev `op` is hardcoded as `Logic.AND` because the tripler being mutually signed should always be a required condition
+            updatedConditions[_details.conditions.length] = Condition({condition: address(this), op: Logic.AND});
+
+            // assign `updatedConditions` to `details.conditions`
+            /// @dev necessary for copying dynamic array of structs to storage
+            for (uint256 i = 0; i < updatedConditions.length; ) {
+                details.conditions.push(updatedConditions[i]);
+                unchecked {
+                    ++i; // cannot overflow without hitting gaslimit
+                }
+            }
+        } else {
+            for (uint256 i = 0; i < _details.conditions.length; ) {
+                details.conditions.push(_details.conditions[i]);
+                unchecked {
+                    ++i; // cannot overflow without hitting gaslimit
+                }
             }
         }
+    }
+
+    /// @notice Function for the `deployer` (intended to be the applicable Agreement Factory) to call indicating the Tripler
+    /// is mutually signed and recorded in the registry
+    function mutualSign() external {
+        if (msg.sender != deployer) revert RicardianTriplerDoubleTokenLexscrow_OnlyDeployer();
+        mutuallySigned = true;
+
+        emit RicardianTriplerDoubleTokenLexscrow_MutuallySigned();
+    }
+
+    /// @notice function to check the condition that the tripler has been mutually signed
+    /// @dev must comply with the ICondition interface
+    /// @param _contract required for ICondition compliance but unused
+    /// @param _functionSignature required for ICondition compliance but unused
+    /// @param data required for ICondition compliance but unused
+    /// @return mutuallySigned condition will return true if the boolean `mutuallySigned` indicates the tripler has been mutually signed
+    function checkCondition(
+        address _contract,
+        bytes4 _functionSignature,
+        bytes memory data
+    ) external view returns (bool) {
+        return mutuallySigned;
+    }
+
+    /// @notice for compliance with ICondition interface
+    function supportsInterface(bytes4 interfaceId) external view virtual returns (bool) {
+        return interfaceId == type(ICondition).interfaceId || interfaceId == type(IERC165).interfaceId;
+    }
+
+    /// @notice Function that returns the details of the agreement.
+    /// @dev view function necessary to convert storage to memory automatically for the nested structs.
+    /// @return details `AgreementDetailsV1` struct containing the details of the agreement.
+    function getDetails() external view returns (AgreementDetailsV1 memory) {
+        return details;
     }
 
     /// @notice Function that returns the version of the agreement.
@@ -128,15 +232,10 @@ contract RicardianTriplerDoubleTokenLexscrow {
     function version() external pure returns (uint256) {
         return AGREEMENT_VERSION;
     }
-
-    /// @notice Function that returns the details of the agreement.
-    /// @dev view function necessary to convert storage to memory automatically for the nested structs.
-    /// @return `AgreementDetailsV1` struct containing the details of the agreement.
-    function getDetails() external view returns (AgreementDetailsV1 memory) {
-        return details;
-    }
 }
 
+/// @title Ricardian Tripler Double Token LeXscroW AgreementV1Factory
+/// @author MetaLeX Labs, Inc.
 /// @notice Factory contract that creates new RicardianTriplerDoubleTokenLexscrow contracts if confirmed properly by both parties
 /// and records their adoption in the DoubleTokenLexscrowRegistry. Either party may propose the agreement adoption, for the other to confirm.
 /// Also contains an option to deploy a Double Token LeXscroW simultaneously with proposing an agreement to ensure the parameters are identical.
@@ -152,6 +251,9 @@ contract AgreementV1Factory is SignatureValidator {
 
     /// @notice hashed agreement details mapped to whether they match a pending agreement
     mapping(bytes32 => bool) public pendingAgreementHash;
+
+    /// @notice pending agreement hash mapped to whether it has a mutually-signed tripler condition (i.e. that the DoubleTokenLexscrow was deployed via this factory)
+    mapping(bytes32 => bool) public signedTriplerCondition;
 
     error RicardianTriplerDoubleTokenLexscrow_NoPendingAgreement();
     error RicardianTriplerDoubleTokenLexscrow_NotParty();
@@ -171,9 +273,9 @@ contract AgreementV1Factory is SignatureValidator {
         registry = registryAddress;
     }
 
-    /// @notice for a party to a DoubleTokenLeXscroW to propose a new RicardianTriplerDoubleTokenLexscrow contract, which will be adopted if confirmed by the
+    /// @notice for a party to an existing DoubleTokenLeXscroW to propose a new RicardianTriplerDoubleTokenLexscrow contract, which will be adopted if confirmed by the
     /// other party to the DoubleTokenLeXscroW.
-    /// @dev this function is for where a DoubleTokenLexscrow is deployed prior to the Tripler; for example condition(s) & LexscrowConditionManager & DoubleTokenLexscrow deployed deterministically
+    /// @dev this function is for where a DoubleTokenLexscrow is deployed prior to the Tripler; use `deployLexscrowAndProposeDoubleTokenLexscrowAgreement()` to simultaneously deploy the Lexscrow with an execution condition that the tripler agreement is mutually signed
     /// @param details The details of the proposed agreement, as an `AgreementDetailsV1` struct
     /// @param _lexscrow the contract address of the existing DoubleTokenLexscrow corresponding to the proposed tripler agreement
     /// @return _agreementAddress address of the pending `RicardianTriplerDoubleTokenLexscrow` agreement
@@ -181,7 +283,7 @@ contract AgreementV1Factory is SignatureValidator {
         AgreementDetailsV1 calldata details,
         address _lexscrow
     ) external returns (address) {
-        RicardianTriplerDoubleTokenLexscrow agreementDetails = new RicardianTriplerDoubleTokenLexscrow(details);
+        RicardianTriplerDoubleTokenLexscrow agreementDetails = new RicardianTriplerDoubleTokenLexscrow(details, false);
         address _agreementAddress = address(agreementDetails);
 
         // if msg.sender is `partyA`, nested map it to the pending agreement to the address that needs to confirm adoption, and vice versa if `partyB`; else, revert
@@ -202,17 +304,24 @@ contract AgreementV1Factory is SignatureValidator {
         return (_agreementAddress);
     }
 
-    /// @notice for a party to an intended DoubleTokenLexscrow to (1) deploy the DoubleTokenLexscrow and
-    /// (2) propose a new RicardianTriplerDoubleTokenLexscrow contract, which will be adopted if confirmed by the
-    /// other party to the DoubleTokenLeXscroW.
+    /// @notice for a party to an intended DoubleTokenLexscrow to (1) propose a new RicardianTriplerDoubleTokenLexscrow agreement contract, which will be adopted if confirmed by the
+    /// other party, and (2) deploy the DoubleTokenLexscrow (with a condition that the tripler be mutually signed)
     /// @dev all of the deployment conditionals and checks for a DoubleTokenLexscrow are housed in `DoubleTokenLexscrow.sol`, so no need to duplicate here
-    /// @param details The details of the proposed DoubleTokenLexscrow and agreement, as an `AgreementDetailsV1` struct
+    /// @param details The details of the proposed DoubleTokenLexscrow and agreement, as an `AgreementDetailsV1` struct-- the mutually-signed tripler 'condition' is added automatically to the details in the function
     /// @param _doubleTokenLexscrowFactory contract address of the DoubleTokenLexscrowFactory.sol which will be used to deploy a DoubleTokenLexscrow
     /// @return _agreementAddress address of the pending `RicardianTriplerDoubleTokenLexscrow` agreement
     function deployLexscrowAndProposeDoubleTokenLexscrowAgreement(
         AgreementDetailsV1 calldata details,
         address _doubleTokenLexscrowFactory
     ) external returns (address) {
+        RicardianTriplerDoubleTokenLexscrow agreementDetails = new RicardianTriplerDoubleTokenLexscrow(details, true);
+        address _agreementAddress = address(agreementDetails);
+
+        /// fetch the updated agreement details (now including the Condition that the tripler is mutually signed) via `getDetails()`
+        AgreementDetailsV1 memory _updatedDetails = IRicardianTriplerDoubleTokenLexscrow(_agreementAddress)
+            .getDetails();
+
+        // deploy the DoubleTokenLexscrow including the updated conditions
         IDoubleTokenLexscrowFactory(_doubleTokenLexscrowFactory).deployDoubleTokenLexscrow(
             false, // `partyA` must be identified-- cannot be an `openOffer`
             details.lockedAssetPartyA.totalAmount, // `totalAmount1`
@@ -223,11 +332,8 @@ contract AgreementV1Factory is SignatureValidator {
             details.lockedAssetPartyA.tokenContract, // `totalContract1`
             details.lockedAssetPartyB.tokenContract, // `totalContract2`
             details.receipt,
-            details.conditions
+            _updatedDetails.conditions // updated conditions now including mutually-signed tripler
         );
-
-        RicardianTriplerDoubleTokenLexscrow agreementDetails = new RicardianTriplerDoubleTokenLexscrow(details);
-        address _agreementAddress = address(agreementDetails);
 
         // if msg.sender is `partyA`, nested map it to the pending agreement to the address that needs to confirm adoption, and vice versa if `partyB`; else, revert
         if (msg.sender == details.partyA.partyBlockchainAddy)
@@ -236,7 +342,9 @@ contract AgreementV1Factory is SignatureValidator {
             pendingAgreement[msg.sender][_agreementAddress] = details.partyA.partyBlockchainAddy;
         else revert RicardianTriplerDoubleTokenLexscrow_NotParty();
 
-        pendingAgreementHash[keccak256(abi.encode(details))] = true;
+        bytes32 _detailsHash = keccak256(abi.encode(_updatedDetails));
+        pendingAgreementHash[_detailsHash] = true;
+        signedTriplerCondition[_detailsHash] = true;
 
         /// @dev `address(0)` placeholder for the lexscrow address, as it is emitted by the factory contract in `DoubleTokenLexscrowFactory_Deployment` but not returned in `deployDoubleTokenLexscrow`
         emit RicardianTriplerDoubleTokenLexscrow_Proposed(
@@ -252,7 +360,9 @@ contract AgreementV1Factory is SignatureValidator {
     /// i.e. the party address that did not initiate the adoption by calling `proposeDoubleTokenLexscrowAgreement`
     /// @param pendingAgreementAddress the address of the pending agreement being confirmed
     /// @param proposingParty the address of the party that initially proposed the pending Agreement
-    /// @param details `AgreementDetailsV1` struct of the agreement details which will be hashed to ensure same parameters as the proposed agreement
+    /// @param details `AgreementDetailsV1` struct of the agreement details which will be hashed to ensure same parameters as the proposed agreement;
+    /// if the DoubleTokenLexscrow was deployed via this factory, note that the `details` must include the mutually-signed tripler condition, which is:
+    /// Condition({condition: `pendingAgreementAddress`, op: Logic.AND})
     function confirmAndAdoptDoubleTokenLexscrowAgreement(
         address pendingAgreementAddress,
         address proposingParty,
@@ -267,6 +377,11 @@ contract AgreementV1Factory is SignatureValidator {
         delete pendingAgreement[proposingParty][pendingAgreementAddress];
         delete pendingAgreementHash[pendingHash];
 
+        /// update `mutuallySigned` in the pending Ricardian Tripler agreement contract if the pending agreement hash such condition, otherwise not necessary as the subsequent registry recordation evidences mutual signature
+        if (signedTriplerCondition[pendingHash])
+            IRicardianTriplerDoubleTokenLexscrow(pendingAgreementAddress).mutualSign();
+
+        /// now mutually signed and adopted, record this agreement in the registry
         IDoubleTokenLexscrowRegistry(registry).recordAdoption(msg.sender, proposingParty, pendingAgreementAddress);
     }
 
@@ -281,6 +396,7 @@ contract AgreementV1Factory is SignatureValidator {
     }
 
     /// @notice Function that returns the version of the agreement factory.
+    /// @return FACTORY_VERSION, the uint256 version of the Agreement factory, 1
     function version() external pure returns (uint256) {
         return FACTORY_VERSION;
     }
