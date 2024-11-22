@@ -124,6 +124,7 @@ contract RicardianTriplerDoubleTokenLexscrow {
     }
 
     /// @notice Function that returns the version of the agreement.
+    /// @return AGREEMENT_VERSION uint256 version of the tripler agreement, 1
     function version() external pure returns (uint256) {
         return AGREEMENT_VERSION;
     }
@@ -156,7 +157,12 @@ contract AgreementV1Factory is SignatureValidator {
     error RicardianTriplerDoubleTokenLexscrow_NotParty();
 
     /// @notice event that fires if an address party to a DoubleTokenLeXscroW proposes a new RicardianTriplerDoubleTokenLexscrow contract
-    event RicardianTriplerDoubleTokenLexscrow_Proposed(address proposer, address pendingAgreementAddress);
+    event RicardianTriplerDoubleTokenLexscrow_Proposed(
+        address indexed partyA,
+        address indexed partyB,
+        address indexed lexscrowAddress,
+        address pendingAgreementAddress
+    );
 
     /// @notice Constructor that sets the DoubleTokenLexscrowRegistry address.
     /// @dev no access control necessary as valid factories are set by the `admin` in the `registry` contract
@@ -167,9 +173,14 @@ contract AgreementV1Factory is SignatureValidator {
 
     /// @notice for a party to a DoubleTokenLeXscroW to propose a new RicardianTriplerDoubleTokenLexscrow contract, which will be adopted if confirmed by the
     /// other party to the DoubleTokenLeXscroW.
+    /// @dev this function is for where a DoubleTokenLexscrow is deployed prior to the Tripler; for example condition(s) & LexscrowConditionManager & DoubleTokenLexscrow deployed deterministically
     /// @param details The details of the proposed agreement, as an `AgreementDetailsV1` struct
+    /// @param _lexscrow the contract address of the existing DoubleTokenLexscrow corresponding to the proposed tripler agreement
     /// @return _agreementAddress address of the pending `RicardianTriplerDoubleTokenLexscrow` agreement
-    function proposeDoubleTokenLexscrowAgreement(AgreementDetailsV1 calldata details) external returns (address) {
+    function proposeDoubleTokenLexscrowAgreement(
+        AgreementDetailsV1 calldata details,
+        address _lexscrow
+    ) external returns (address) {
         RicardianTriplerDoubleTokenLexscrow agreementDetails = new RicardianTriplerDoubleTokenLexscrow(details);
         address _agreementAddress = address(agreementDetails);
 
@@ -182,7 +193,12 @@ contract AgreementV1Factory is SignatureValidator {
 
         pendingAgreementHash[keccak256(abi.encode(details))] = true;
 
-        emit RicardianTriplerDoubleTokenLexscrow_Proposed(msg.sender, _agreementAddress);
+        emit RicardianTriplerDoubleTokenLexscrow_Proposed(
+            details.partyA.partyBlockchainAddy,
+            details.partyB.partyBlockchainAddy,
+            _lexscrow,
+            _agreementAddress
+        );
         return (_agreementAddress);
     }
 
@@ -222,7 +238,13 @@ contract AgreementV1Factory is SignatureValidator {
 
         pendingAgreementHash[keccak256(abi.encode(details))] = true;
 
-        emit RicardianTriplerDoubleTokenLexscrow_Proposed(msg.sender, _agreementAddress);
+        /// @dev `address(0)` placeholder for the lexscrow address, as it is emitted by the factory contract in `DoubleTokenLexscrowFactory_Deployment` but not returned in `deployDoubleTokenLexscrow`
+        emit RicardianTriplerDoubleTokenLexscrow_Proposed(
+            details.partyA.partyBlockchainAddy,
+            details.partyB.partyBlockchainAddy,
+            address(0),
+            _agreementAddress
+        );
         return (_agreementAddress);
     }
 
