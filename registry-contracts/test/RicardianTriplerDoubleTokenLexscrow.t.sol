@@ -38,7 +38,7 @@ contract RicardianTriplerDoubleTokenLexscrowTest is Test {
     function testVersion() public {
         assertEq(FACTORY_VERSION, factory.version(), "factory version != 1");
         AgreementDetailsV1 storage mockDetails = details[address(this)];
-        RicardianTriplerDoubleTokenLexscrow newAgreement = new RicardianTriplerDoubleTokenLexscrow(mockDetails);
+        RicardianTriplerDoubleTokenLexscrow newAgreement = new RicardianTriplerDoubleTokenLexscrow(mockDetails, false);
         assertEq(AGREEMENT_VERSION, newAgreement.version(), "agreement version != 1");
     }
 
@@ -46,7 +46,7 @@ contract RicardianTriplerDoubleTokenLexscrowTest is Test {
         ++firstPartyNonce;
         vm.prank(firstParty);
         AgreementDetailsV1 storage mockDetails = details[address(this)];
-        address _newAgreement = factory.proposeDoubleTokenLexscrowAgreement(mockDetails);
+        address _newAgreement = factory.proposeDoubleTokenLexscrowAgreement(mockDetails, address(1));
         bytes32 _pendingHash = keccak256(abi.encode(mockDetails));
         assertEq(factory.pendingAgreement(firstParty, _newAgreement), secondParty, "secondParty should be pending");
         assertTrue(factory.pendingAgreementHash(_pendingHash), "_pendingHash should be mapped to true");
@@ -69,7 +69,7 @@ contract RicardianTriplerDoubleTokenLexscrowTest is Test {
         ++firstPartyNonce;
         AgreementDetailsV1 storage mockDetails = details[address(this)];
         vm.prank(firstParty);
-        address _newAgreement = factory.proposeDoubleTokenLexscrowAgreement(mockDetails);
+        address _newAgreement = factory.proposeDoubleTokenLexscrowAgreement(mockDetails, address(1));
         bytes32 _pendingHash = keccak256(abi.encode(mockDetails));
         assertEq(factory.pendingAgreement(firstParty, _newAgreement), secondParty, "secondParty should be pending");
         assertTrue(factory.pendingAgreementHash(_pendingHash), "_pendingHash should be mapped to true");
@@ -100,13 +100,24 @@ contract RicardianTriplerDoubleTokenLexscrowTest is Test {
             mockDetails,
             address(this)
         );
-        bytes32 _pendingHash = keccak256(abi.encode(mockDetails));
+
+        AgreementDetailsV1 memory _updatedDetails = IRicardianTriplerDoubleTokenLexscrow(_newAgreement).getDetails();
+
+        /// @dev hash will include the added tripler condition, get it from the agreement contract
+        bytes32 _pendingHash = keccak256(abi.encode(_updatedDetails));
         assertEq(factory.pendingAgreement(firstParty, _newAgreement), secondParty, "secondParty should be pending");
         assertTrue(factory.pendingAgreementHash(_pendingHash), "_pendingHash should be mapped to true");
 
         vm.prank(secondParty);
-        factory.confirmAndAdoptDoubleTokenLexscrowAgreement(_newAgreement, firstParty, mockDetails);
-
+        /// @dev confirming party should match the details pulled from the pending agreement
+        bytes32 _updatedHash = keccak256(abi.encode(_updatedDetails));
+        if (_updatedHash != _pendingHash) {
+            vm.expectRevert();
+            factory.confirmAndAdoptDoubleTokenLexscrowAgreement(_newAgreement, firstParty, _updatedDetails);
+        } else {
+            assertEq(_updatedHash, _pendingHash, "hashes do not match");
+            factory.confirmAndAdoptDoubleTokenLexscrowAgreement(_newAgreement, firstParty, _updatedDetails);
+        }
         assertEq(registry.agreements(firstParty, firstPartyNonce), _newAgreement, "agreement address does not match");
         assertTrue(registry.signedAgreement(_newAgreement), "signedAgreement should be true for new agreement address");
 
@@ -126,14 +137,27 @@ contract RicardianTriplerDoubleTokenLexscrowTest is Test {
             mockDetails,
             address(this)
         );
-        bytes32 _pendingHash = keccak256(abi.encode(mockDetails));
+        // deliberately do not add the tripler condition by using the unaltered `mockDetails` rather than using `getDetails()`
+        bytes32 _wrongPendingHash = keccak256(abi.encode(mockDetails));
+
+        AgreementDetailsV1 memory _updatedDetails = IRicardianTriplerDoubleTokenLexscrow(_newAgreement).getDetails();
+
+        bytes32 _pendingHash = keccak256(abi.encode(_updatedDetails));
         assertEq(factory.pendingAgreement(firstParty, _newAgreement), secondParty, "secondParty should be pending");
-        assertTrue(factory.pendingAgreementHash(_pendingHash), "_pendingHash should be mapped to true");
+        assertTrue(
+            !factory.pendingAgreementHash(_wrongPendingHash),
+            "_wrongPendingHash should be wrong, so pendingAgreementHash should be false"
+        );
+        assertTrue(factory.pendingAgreementHash(_pendingHash), "hash not pending");
+
+        // ensure hashes do not match
+        bytes32 _updatedHash = keccak256(abi.encode(_updatedDetails));
+        assertTrue(_updatedHash != _wrongPendingHash, "hashes unexpectedly match");
 
         vm.prank(_randomAddr);
         if (_randomAddr != secondParty) {
-            vm.expectRevert();
-            factory.confirmAndAdoptDoubleTokenLexscrowAgreement(_newAgreement, firstParty, mockDetails);
+            vm.expectRevert(); // should revert if not the second party calling
+            factory.confirmAndAdoptDoubleTokenLexscrowAgreement(_newAgreement, firstParty, _updatedDetails);
 
             // 'secondParty' should still be pending
             assertEq(secondParty, factory.pendingAgreement(firstParty, _newAgreement), "second party not pending");
@@ -145,7 +169,23 @@ contract RicardianTriplerDoubleTokenLexscrowTest is Test {
                 !registry.signedAgreement(_newAgreement),
                 "signedAgreement should remain false for new agreement address"
             );
+        } else {
+            // ensure second party calling with the wrong details still reverts
+            vm.expectRevert();
+            factory.confirmAndAdoptDoubleTokenLexscrowAgreement(_newAgreement, firstParty, mockDetails);
         }
+    }
+
+    function testMutualSign_invalid(address _addr) public {
+        AgreementDetailsV1 storage mockDetails = details[address(this)];
+        vm.prank(firstParty);
+        address _newAgreement = factory.deployLexscrowAndProposeDoubleTokenLexscrowAgreement(
+            mockDetails,
+            address(this)
+        );
+        vm.prank(_addr);
+        if (_addr != address(this)) vm.expectRevert();
+        IRicardianTriplerDoubleTokenLexscrow(_newAgreement).mutualSign();
     }
 
     function testValidateAccount() public {
@@ -212,4 +252,22 @@ contract RicardianTriplerDoubleTokenLexscrowTest is Test {
         mockDetails.conditions = emptyConditions;
         mockDetails.otherConditions = "mercury not in retrograde";
     }
+
+    /** for reference, the logic for the automatically-added required tripler condition
+        Condition[] memory updatedConditions = new Condition[](1);
+
+        // add the new condition to the last slot, with address(this) as the condition contract
+        /// @dev `op` is hardcoded as `Logic.AND` because the tripler being mutually signed should always be a required condition
+        updatedConditions[emptyConditions.length] = Condition({condition: address(this), op: Logic.AND});
+
+        // assign `updatedConditions` to `details.conditions`
+        /// @dev necessary for copying dynamic array of structs to storage
+        for (uint256 i = 0; i < updatedConditions.length; ) {
+            mockDetails.conditions.push(updatedConditions[i]);
+            unchecked {
+                ++i; // cannot overflow without hitting gaslimit
+            }
+        }
+        return mockDetails;
+    } */
 }
