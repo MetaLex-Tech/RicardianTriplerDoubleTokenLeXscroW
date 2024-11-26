@@ -377,9 +377,8 @@ contract AgreementV1Factory is SignatureValidator {
         delete pendingAgreement[proposingParty][pendingAgreementAddress];
         delete pendingAgreementHash[pendingHash];
 
-        /// update `mutuallySigned` in the pending Ricardian Tripler agreement contract if the pending agreement hash such condition, otherwise not necessary as the subsequent registry recordation evidences mutual signature
-        if (signedTriplerCondition[pendingHash])
-            IRicardianTriplerDoubleTokenLexscrow(pendingAgreementAddress).mutualSign();
+        /// update `mutuallySigned` in the pending Ricardian Tripler agreement contract; the subsequent registry recordation also evidences mutual signature
+        IRicardianTriplerDoubleTokenLexscrow(pendingAgreementAddress).mutualSign();
 
         /// now mutually signed and adopted, record this agreement in the registry
         IDoubleTokenLexscrowRegistry(registry).recordAdoption(msg.sender, proposingParty, pendingAgreementAddress);
