@@ -1,12 +1,13 @@
-# Double Token LeXscroW Registry
+# Double Token LeXscroW Tripler Registry
 
 This directory houses smart contracts written in Solidity which serve three main purposes:
 
-1. Allow parties to a Double Token LeXscroW to officially adopt the form agreement with their chosen governing law and dispute resolution.
-2. Store the agreement details on-chain for ease-of-use and persistent credibly neutral storage.
-3. Allow for future agreement versions and adoptions without affecting prior agreements.
+1. Allow parties to a Double Token LeXscroW (whether pre-existing or simultaneously deployed with the tripler agreement) to officially adopt the form agreement with their chosen governing law and dispute resolution.
+2. If the Double Token LeXscroW is deployed simultaneously, make its execution immutably contingent upon mutual signature of the tripler agreement.
+3. Store the agreement details on-chain for ease-of-use and persistent credibly neutral storage.
+4. Allow for future agreement versions and adoptions without affecting prior agreements.
 
-# Technical Details
+### Technical Details
 
 This repository is built using [Foundry](https://book.getfoundry.sh/). See the installation instructions [here](https://github.com/foundry-rs/foundry#installation). To test the contracts, use `forge test`.
 
@@ -17,22 +18,105 @@ Contracts in this system:
 -   `RicardianTriplerDoubleTokenLexscrow` - Adopted agreements proposed by a party and confirmed by the other party to a Double Token LeXscroW.
 -   `SignatureValidator` - Used to determine whether a hash was validly signed by an address
 
-## Setup
+### Setup
 
-1. The `DoubleTokenLexscrowRegistry` contract is deployed with the `admin` passed as a constructor argument.
-2. The `AgreementV1Factory` contract is deployed with the `DoubleTokenLexscrowRegistry` address passed as a constructor argument.
+1. The `DoubleTokenLexscrowRegistry` contract is deployed by MetaLeX with the `admin` passed as a constructor argument.
+2. The `AgreementV1Factory` contract is deployed by MetaLeX with the `DoubleTokenLexscrowRegistry` address passed as a constructor argument.
 3. The `DoubleTokenLexscrowRegistry` `admin` calls `enableFactory()` on `DoubleTokenLexscrowRegistry` with the `AgreementV1Factory`'s address.
 
 In the future MetaLeX may create new versions of the legal agreement, or adjust the agreement details struct. When this happens a new factory (e.g. `AgreementV2Factory`) may be deployed and enabled using the `enableFactory()` method. Optionally, the registry admin may disable old factories to prevent new adoptions using old agreement structures. 
 
-## Adoption
+## Propose and Deploy
+### Deploy Proposed Agreement and LeXscroW
 
-1.  A party to a Double Token LeXscroW calls `proposeDoubleTokenLexscrowAgreement()` on an `AgreementFactory` with their `AgreementDetails`. To deploy a Double Token LeXscroW and propose a `RicardianTriplerDoubleTokenLexscrow` agreement simultaneously, a party calls `deployLexscrowAndProposeDoubleTokenLexscrowAgreement()` with the same parameters included in the passed `AgreementDetails` and the applicable contract address of the `DoubleTokenLexscrowFactory` which will be used to deploy the Double Token LeXscroW.
-2.  The factory creates an `RicardianTriplerDoubleTokenLexscrow` contract containing the provided `AgreementDetails`.
-3.  The other party to the applicable Double Token LeXscroW calls `confirmAndAdoptDoubleTokenLexscrowAgreement()` with identical `AgreementDetails`, the pending agreement's contract address, and the address of initial proposing party to confirm adoption.
-4.  The factory adds the `RicardianTriplerDoubleTokenLexscrow` contract address to the `DoubleTokenLexscrowRegistry`.
+To simultaneously deploy a proposed agreement and a DoubleTokenLexscrow matching its `AgreementDetails`, a user may call `deployLexscrowAndProposeDoubleTokenLexscrowAgreement()` in the `AgreementV1Factory`, supplying:
 
-Calling `confirmAndAdoptDoubleTokenLexscrowAgreement()` operates as a legally binding countersignature to the agreement, binding the two parties to the agreement.
+| Param  | Type | Description 
+| :---:  |:----:|  :---: |
+| `details` | AgreementDetailsV1 | The details of the proposed DoubleTokenLexscrow and agreement, as an `AgreementDetailsV1` struct (see below) |
+| `_doubleTokenLexscrowFactory` | address | Contract address of the DoubleTokenLexscrowFactory.sol which will be called in this function to deploy a DoubleTokenLexscrow |
+
+AgreementDetailsV1 structs have the following syntax:
+``` solidity
+struct AgreementDetailsV1 {
+    /// @notice The details of the parties adopting the agreement
+    Party partyA;
+    Party partyB;
+    /// @notice The assets and amounts being escrowed by each party
+    LockedAsset lockedAssetPartyA;
+    LockedAsset lockedAssetPartyB;
+    /// @notice block.timestamp expiration time
+    uint256 expirationTime;
+    /// @notice optional contract to return an informational receipt of a `LockedAsset` value, otherwise address(0)
+    address receipt;
+    /// @notice IPFS hash of the official MetaLeX LeXscroW Agreement version being agreed to which confirms all terms, and may contain a unique interface identifier
+    string legalAgreementURI;
+    /// @notice governing law for the Agreement
+    string governingLaw;
+    /// @notice dispute resolution elected by the parties
+    string disputeResolutionMethod;
+    /// @notice array of `Condition` structs upon which the DoubleTokenLexscrow is contingent
+    Condition[] conditions;
+    /// @notice any additional conditions precedent not included in `conditions`; note the DoubleTokenLexscrow's onchain execution will not be affected by these
+    string otherConditions;
+}
+   /// @notice match `Condition` as defined in LexscrowConditionManager
+struct Condition {
+    address condition;
+    Logic op;
+}
+
+/// @notice the details of a locked asset
+struct LockedAsset {
+    /// @notice token contract address (`tokenContract1` or `tokenContract2` in the DoubleTokenLexscrow)
+    address tokenContract;
+    /// @notice total amount of `tokenContract` locked
+    uint256 totalAmount;
+}
+
+/// @notice details of a party (`partyB` or `partyA`): address, name, and contact information
+struct Party {
+    /// @notice The blockchain address of the party
+    address partyBlockchainAddy;
+    /// @notice The name of the party adopting the agreement
+    string partyName;
+    /// @notice The contact details of the party (required for legal notifications under the agreement)
+    string contactDetails;
+}
+
+```
+This function returns `_agreementAddress`: the contract address of the deployed and pending `RicardianTriplerDoubleTokenLexscrow` agreement. The newly deployed Double Token LeXscroW contract address is emitted in the `DoubleTokenLexscrowFactory_Deployment` event in the `_doubleTokenLexscrowFactory` contract.
+
+
+### Deploy Proposed Agreement for an Existing LeXscroW
+
+A party to an existing Double Token LeXscroW calls `proposeDoubleTokenLexscrowAgreement()` in the `AgreementV1Factory`, supplying:
+
+| Param  | Type | Description 
+| :---:  |:----:|  :---: |
+| `details` | AgreementDetailsV1 |the `AgreementDetails` that match the proposer's pre-existing LeXscroW at the `_lexscrow` address|
+| `_lexscrow` | address | The contract address of the existing DoubleTokenLexscrow corresponding to the proposed tripler agreement|
+
+This function returns `_agreementAddress`: the contract address of the deployed and pending `RicardianTriplerDoubleTokenLexscrow` agreement
+
+
+## Confirm and Adopt
+
+The other party to the applicable Double Token LeXscroW, regardless of whether deployed simultaneously with the tripler agreement or pre-existing, calls `confirmAndAdoptDoubleTokenLexscrowAgreement()` in the `AgreementV1Factory`, supplying:
+
+| Param  | Type | Description 
+| :---:  |:----:|  :---: |
+| `pendingAgreementAddress` | address | the contract address of the tripler agreement being confirmed |
+| `proposingParty` | address | the address of the party that initially proposed the pending Agreement |
+| `details` | AgreementDetailsV1 |agreement details which will be hashed to ensure they match the proposed agreement; if the DoubleTokenLexscrow was deployed via the tripler, the `details` must include the automatically-added tripler condition |
+
+The confirming party may easily access the `details` by calling `getDetails()` in the `pendingAgreementAddress`, which returns its details struct. 
+
+Upon confirmation, the factory (1) calls `mutualSign()` in the `pendingAgreementAddress`, and (2) adds the `RicardianTriplerDoubleTokenLexscrow` contract address to the `DoubleTokenLexscrowRegistry`.
+
+Calling `confirmAndAdoptDoubleTokenLexscrowAgreement()` operates as a binding countersignature to the agreement, binding the two parties to the agreement. Once confirmed, the parties' agreement's `mutuallySigned` boolean variable, and the `signedAgreement` mapping in the `DoubleTokenLexscrowRegistry`, will be irrevocably set to `true`.
+
+---
 
 ### Signed Accounts
 
@@ -57,9 +141,9 @@ Parties may use the agreement factory's `validateAccount()` method to verify tha
 
 Different versions may have different `AgreementDetails` structs. All `RicardianTriplerDoubleTokenLexscrow` and `AgreementFactory` contracts will include a `version()` method that can be used to infer the `AgreementDetails` structure.
 
-# Deployment
+## Deployment
 
-The Double Token LeXscroW Registry will be deployed using the deterministic deployment proxy described here: https://github.com/Arachnid/deterministic-deployment-proxy, which is built into Foundry by default.
+The Double Token LeXscroW Registry may be deployed using the deterministic deployment proxy described here: https://github.com/Arachnid/deterministic-deployment-proxy, which is built into Foundry by default.
 
 To deploy the registry to an EVM-compatible chain where it is not currently deployed:
 
